@@ -1,27 +1,88 @@
 package tsm1
 
 import (
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/influxdata/influxdb/pkg/pool"
 )
 
 var (
-	bufPool          = pool.NewBytes(1024)
+	bufPoolSmall     = pool.NewBytes(256)
+	bufPoolMedium    = pool.NewBytes(256)
+	bufPoolLarge     = pool.NewBytes(256)
+	bufPoolXLarge    = pool.NewBytes(16)
 	float64ValuePool sync.Pool
 	integerValuePool sync.Pool
 	booleanValuePool sync.Pool
 	stringValuePool  sync.Pool
 )
 
+func init() {
+	// output pool stats to stdout
+	go func() {
+		for {
+			capS := bufPoolSmall.GetPoolCapacity() / 1048576
+			getS, putS := bufPoolSmall.GetCounts()
+
+			capM := bufPoolMedium.GetPoolCapacity() / 1048576
+			getM, putM := bufPoolMedium.GetCounts()
+
+			capL := bufPoolLarge.GetPoolCapacity() / 1048576
+			getL, putL := bufPoolLarge.GetCounts()
+
+			capXL := bufPoolXLarge.GetPoolCapacity() / 1048576
+			getXL, putXL := bufPoolXLarge.GetCounts()
+
+			fmt.Printf("%s bufPool capacities s: %d (%6d %6d) m: %d (%6d %6d) l: %d (%6d %6d) xl: %d (%6d %6d) total: %d\n",
+				time.Now().Format("2006-01-02 15:04:05"),
+				capS, getS, putS,
+				capM, getM, putM,
+				capL, getL, putL,
+				capXL, getXL, putXL,
+				capS+capM+capL+capXL,
+			)
+			time.Sleep(5 * time.Second)
+		}
+	}()
+
+}
+
+// pool size thresholds
+const (
+	small  = 524288
+	medium = 1048576
+	large  = 4194304
+)
+
 // getBuf returns a buffer with length size from the buffer pool.
 func getBuf(size int) []byte {
-	return bufPool.Get(size)
+	switch {
+	case size <= small:
+		return bufPoolSmall.Get(size, small)
+	case size <= medium:
+		return bufPoolMedium.Get(size, medium)
+	case size <= large:
+		return bufPoolLarge.Get(size, large)
+	default:
+		return bufPoolXLarge.Get(size, size)
+	}
 }
 
 // putBuf returns a buffer to the pool.
 func putBuf(buf []byte) {
-	bufPool.Put(buf)
+	size := cap(buf)
+	switch {
+	case size <= small:
+		bufPoolSmall.Put(buf)
+	case size <= medium:
+		bufPoolMedium.Put(buf)
+	case size <= large:
+		bufPoolLarge.Put(buf)
+	default:
+		bufPoolXLarge.Put(buf)
+	}
 }
 
 // getBuf returns a buffer with length size from the buffer pool.
