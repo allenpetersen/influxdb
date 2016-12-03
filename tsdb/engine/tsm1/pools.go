@@ -1,13 +1,33 @@
 package tsm1
 
-import (
-	"sync"
+import "sync"
 
-	"github.com/influxdata/influxdb/pkg/pool"
+// pool size thresholds
+const (
+	small  = 524288
+	medium = 1048576
+	large  = 4194304
 )
 
 var (
-	bufPool          = pool.NewBytes(1024)
+	bufPoolSmall = sync.Pool{
+		New: func() interface{} {
+			return make([]byte, 0, 524288)
+		},
+	}
+
+	bufPoolMedium = sync.Pool{
+		New: func() interface{} {
+			return make([]byte, 0, 1048576)
+		},
+	}
+
+	bufPoolLarge = sync.Pool{
+		New: func() interface{} {
+			return make([]byte, 0, 4194304)
+		},
+	}
+
 	float64ValuePool sync.Pool
 	integerValuePool sync.Pool
 	booleanValuePool sync.Pool
@@ -16,12 +36,34 @@ var (
 
 // getBuf returns a buffer with length size from the buffer pool.
 func getBuf(size int) []byte {
-	return bufPool.Get(size)
+	var result []byte
+	switch {
+	case size <= small:
+		result = bufPoolSmall.Get().([]byte)
+	case size <= medium:
+		result = bufPoolMedium.Get().([]byte)
+	case size <= large:
+		result = bufPoolLarge.Get().([]byte)
+	default:
+		return make([]byte, size)
+	}
+
+	return result[:size]
 }
 
 // putBuf returns a buffer to the pool.
 func putBuf(buf []byte) {
-	bufPool.Put(buf)
+	size := cap(buf)
+	switch {
+	case size <= small:
+		bufPoolSmall.Put(buf)
+	case size <= medium:
+		bufPoolMedium.Put(buf)
+	case size <= large:
+		bufPoolLarge.Put(buf)
+	default:
+		// nothing to do for XLarge buffers
+	}
 }
 
 // getBuf returns a buffer with length size from the buffer pool.
