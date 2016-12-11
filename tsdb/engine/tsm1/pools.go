@@ -1,13 +1,19 @@
 package tsm1
 
-import (
-	"sync"
+import "sync"
 
-	"github.com/influxdata/influxdb/pkg/pool"
+// pool size thresholds
+const (
+	small  = 524288
+	medium = 1048576
+	large  = 4194304
 )
 
 var (
-	bufPool          = pool.NewBytes(10)
+	bufPoolSmall  sync.Pool
+	bufPoolMedium sync.Pool
+	bufPoolLarge  sync.Pool
+
 	float64ValuePool sync.Pool
 	integerValuePool sync.Pool
 	booleanValuePool sync.Pool
@@ -16,12 +22,42 @@ var (
 
 // getBuf returns a buffer with length size from the buffer pool.
 func getBuf(size int) []byte {
-	return bufPool.Get(size)
+	var buf interface{}
+	var bucketSize int
+	switch {
+	case size <= small:
+		bucketSize = small
+		buf = bufPoolSmall.Get()
+	case size <= medium:
+		bucketSize = medium
+		buf = bufPoolMedium.Get()
+	case size <= large:
+		bucketSize = large
+		buf = bufPoolLarge.Get()
+	default:
+		return make([]byte, size)
+	}
+
+	// pool was empty make a new buffer
+	if buf == nil {
+		return make([]byte, size, bucketSize)
+	}
+
+	return buf.([]byte)[:size]
 }
 
 // putBuf returns a buffer to the pool.
 func putBuf(buf []byte) {
-	bufPool.Put(buf)
+	size := cap(buf)
+	// discard buffers that don't match pool sizes
+	switch size {
+	case small:
+		bufPoolSmall.Put(buf)
+	case medium:
+		bufPoolMedium.Put(buf)
+	case large:
+		bufPoolLarge.Put(buf)
+	}
 }
 
 // getBuf returns a buffer with length size from the buffer pool.
